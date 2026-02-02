@@ -1,0 +1,214 @@
+local player = game.Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+-- Sesler
+local clickSound = Instance.new("Sound")
+clickSound.SoundId = "rbxassetid://6895079853"
+clickSound.Volume = 0.5
+clickSound.Parent = game.Workspace
+
+local toggleSound = Instance.new("Sound")
+toggleSound.SoundId = "rbxassetid://6042053779"
+toggleSound.Volume = 0.4
+toggleSound.Parent = game.Workspace
+
+-- GUI Tasarımı
+local screengui = Instance.new("ScreenGui")
+screengui.Name = "ComboHelperModern"
+screengui.Parent = game.CoreGui
+screengui.ResetOnSpawn = false
+
+local btn = Instance.new("TextButton")
+btn.Parent = screengui
+btn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+btn.Position = UDim2.new(0.85, 0, 0.2, 0)
+btn.Size = UDim2.new(0, 100, 0, 45)
+btn.Font = Enum.Font.GothamBold
+btn.Text = "WAITING"
+btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+btn.TextSize = 14
+btn.AutoButtonColor = false
+btn.ClipsDescendants = true
+
+local corner = Instance.new("UICorner", btn)
+corner.CornerRadius = UDim.new(0, 12)
+
+local stroke = Instance.new("UIStroke", btn)
+stroke.Thickness = 2
+stroke.Color = Color3.fromRGB(60, 60, 60)
+stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+
+local gradient = Instance.new("UIGradient", btn)
+gradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(200, 200, 200))
+})
+
+local watermark = Instance.new("TextLabel", btn)
+watermark.Size = UDim2.new(1, 0, 0, 10)
+watermark.Position = UDim2.new(0, 0, 1, -12)
+watermark.BackgroundTransparency = 1
+watermark.Font = Enum.Font.GothamSemibold
+watermark.Text = "BY PAIDCHICKEN"
+watermark.TextColor3 = Color3.fromRGB(255, 255, 255)
+watermark.TextTransparency = 0.6
+watermark.TextSize = 8
+
+-------------------------------------------------------------------------
+-- SÜRÜKLEME (HIÇBIR ŞEYİ BOZMAYAN SİSTEM)
+-------------------------------------------------------------------------
+local dragging, dragInput, dragStart, startPos
+
+btn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = btn.Position
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        btn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+-------------------------------------------------------------------------
+-- SENİN ORİJİNAL KOMBO MANTIĞIN
+-------------------------------------------------------------------------
+local on = false
+local doingTheThing = false
+local rotateConn, gyroLock, cancelConn, animConn
+local ANIM_ID = "rbxassetid://95034083206292"
+local CANCEL_ANIM_ID = "rbxassetid://14798608838"
+
+local dashWait, afterDash, turnTime, stayLeft, lockTime, maxDist = 2.44, 0.0, 0.05, 0.06, 0.6, 100
+
+local function tweenButton(active)
+    local targetColor = active and Color3.fromRGB(0, 180, 255) or Color3.fromRGB(30, 30, 30)
+    local strokeColor = active and Color3.fromRGB(100, 220, 255) or Color3.fromRGB(60, 60, 60)
+    local targetText = active and "ACTIVE" or "OFF"
+    
+    TweenService:Create(btn, TweenInfo.new(0.3), {BackgroundColor3 = targetColor}):Play()
+    TweenService:Create(stroke, TweenInfo.new(0.3), {Color = strokeColor}):Play()
+    btn.Text = targetText
+    if active then toggleSound:Play() else clickSound:Play() end
+end
+
+local function findClosest(root)
+    local closest, bestDist = nil, math.huge
+    local live = workspace:FindFirstChild("Live")
+    if not live then return nil end
+    for _, obj in ipairs(live:GetChildren()) do
+        local hrp = obj:FindFirstChild("HumanoidRootPart")
+        if hrp and obj ~= player.Character then
+            local dist = (root.Position - hrp.Position).Magnitude
+            if dist < bestDist and dist < maxDist then
+                bestDist = dist
+                closest = hrp
+            end
+        end
+    end
+    return closest
+end
+
+local function cleanupAll()
+    doingTheThing = false
+    if rotateConn then rotateConn:Disconnect() rotateConn = nil end
+    if gyroLock then gyroLock:Destroy() gyroLock = nil end
+    if cancelConn then cancelConn:Disconnect() cancelConn = nil end
+    local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+    if hum then hum.AutoRotate = true end
+    tweenButton(on)
+end
+
+local function doCombo()
+    local char = player.Character
+    if not char or doingTheThing then return end
+    
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChild("Humanoid")
+    local remote = char:FindFirstChild("Communicate")
+    if not hrp or not hum or not remote then return end
+    
+    doingTheThing = true
+    btn.Text = "EXECUTING..."
+    
+    -- İptal animasyonu takibi
+    cancelConn = hum.AnimationPlayed:Connect(function(track)
+        if track.Animation.AnimationId == CANCEL_ANIM_ID then cleanupAll() end
+    end)
+
+    rotateConn = RunService.RenderStepped:Connect(function()
+        if doingTheThing then hum.AutoRotate = false end
+    end)
+    
+    task.wait(dashWait)
+    if not doingTheThing then return end
+    
+    remote:FireServer({Dash = Enum.KeyCode.W, Key = Enum.KeyCode.Q, Goal = "KeyPress"})
+    
+    task.wait(afterDash)
+    hum:ChangeState(Enum.HumanoidStateType.Jumping)
+    hrp.AssemblyLinearVelocity = Vector3.new(hrp.AssemblyLinearVelocity.X, 45, hrp.AssemblyLinearVelocity.Z)
+    
+    local target = findClosest(hrp)
+    if target then
+        gyroLock = Instance.new("BodyGyro")
+        gyroLock.MaxTorque = Vector3.new(0, 400000, 0)
+        gyroLock.P = 600000
+        gyroLock.Parent = hrp
+        
+        local lockLoop
+        lockLoop = RunService.Heartbeat:Connect(function()
+            if gyroLock and target and doingTheThing then
+                gyroLock.CFrame = CFrame.lookAt(hrp.Position, target.Position)
+            else
+                lockLoop:Disconnect()
+            end
+        end)
+        task.delay(lockTime, function() if lockLoop then lockLoop:Disconnect() end if gyroLock then gyroLock:Destroy() end end)
+    end
+    
+    task.wait(lockTime)
+    cleanupAll()
+end
+
+local function toggleScript()
+    on = not on
+    tweenButton(on)
+    
+    if on then
+        local char = player.Character or player.CharacterAdded:Wait()
+        local hum = char:WaitForChild("Humanoid")
+        animConn = hum.AnimationPlayed:Connect(function(track)
+            if track.Animation.AnimationId == ANIM_ID then
+                task.spawn(doCombo)
+            end
+        end)
+    else
+        if animConn then animConn:Disconnect() animConn = nil end
+        cleanupAll()
+    end
+end
+
+-- Kontroller
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == Enum.KeyCode.N then
+        btn.Visible = not btn.Visible
+    elseif input.KeyCode == Enum.KeyCode.V then
+        toggleScript()
+    end
+end)
+
+btn.MouseButton1Click:Connect(toggleScript)
